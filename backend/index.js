@@ -58,12 +58,19 @@ app.post('/api/gemini-suggestion', async (req, res) => {
 - 珠寶：${color_suggestions.jewelry.join('、')}
 - 避免顏色：${color_suggestions.avoid.join('、')}
 
-請提供具體的穿搭建議、彩妝建議，以及為什麼這些顏色適合這個季節型的原因。語氣要親切、專業且實用。敘述的內容中不要顯示色碼，直接以該色碼的繁體中文顯示，並且分段落呈現，例如肌膚色調分析、頭髮顏色分析...等，分析說明如以下格式 :您的頭髮顏色為（如：深棕、淺褐、黑色等），與膚色搭配（如：協調／對比），整體感覺（如：自然、成熟、活潑等，開頭部分不需要親愛的，也不需要甚麼某某型美人，清楚且直接的說明即可`;
+請用 markdown 格式撰寫，所有小標題請用 ## 或 ### 標記。
+請提供具體的穿搭建議、彩妝建議，以及為什麼這些顏色適合這個季節型的原因。語氣要親切、專業且實用，不要提到性別。敘述的內容中不要顯示色碼，直接以下方提供的色名描述，並且分段落呈現，例如肌膚色調分析、頭髮顏色分析...等。**請務必只用上述膚色、眼睛、頭髮的色名（${skin_tone}、${eye_color}、${hair_color}），不要自行創造或改寫顏色名稱。** 分析說明如以下格式 :1. 👤 色彩季型判定（春暖／夏冷／秋暖／冬冷，並解釋理由）
+2. 👗 穿搭建議色彩（分為主色、配色、避免色）
+3. 💄 化妝品建議（底妝質地、腮紅色系、唇色、眼影）
+4. 💍 飾品建議（金屬色系與風格）
+段落前面不要有數字`;
 
+    console.log('Gemini Suggestion Prompt:', prompt);
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: prompt,
     });
+    console.log('Gemini 建議原始內容:', response.text);
     const suggestion = response.text;
     res.json({ suggestion });
   } catch (err) {

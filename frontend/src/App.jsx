@@ -284,6 +284,74 @@ function AnalysisResult({ result, colorNames }) {
   );
 }
 
+// 只從「可視化色板」段落擷取色碼
+function extractPaletteHexes(suggestion) {
+  if (!suggestion) return [];
+  // 支援 ##/###/#### 可視化色板，允許標題前後有空格、冒號
+  const vizSection = suggestion.match(/#+\s*可視化色板[：:]*[\s\S]*?(?=\n#+\s|$)/);
+  console.log('extractPaletteHexes - vizSection:', vizSection ? vizSection[0] : '無');
+  if (!vizSection) return [];
+  // 從該段落擷取 #XXXXXX
+  const matches = vizSection[0].match(/#[0-9a-fA-F]{6}/g);
+  if (!matches) return [];
+  return matches.slice(0, 6);
+}
+
+// 解析 Gemini 建議中的主色與輔助色中文名稱
+function extractMainAndAssistNames(suggestion) {
+  if (!suggestion) return { main: [], assist: [] };
+  // 主色：找出「主色」段落下的所有中文名稱
+  const mainMatch = suggestion.match(/主色[：:][^\n]*([\s\S]*?)(?:輔助色|$)/);
+  const assistMatch = suggestion.match(/輔助色[：:][^\n]*([\s\S]*?)(?:\n|$)/);
+  const extractNames = str => {
+    if (!str) return [];
+    // 找出「中文名稱（#XXXXXX）」或「中文名稱」
+    return Array.from(str.matchAll(/([\u4e00-\u9fa5A-Za-z0-9]+)(?:\s*\(#?[0-9A-Fa-f]{6}\))?/g)).map(m => m[1]).filter(Boolean);
+  };
+  return {
+    main: extractNames(mainMatch ? mainMatch[1] : ''),
+    assist: extractNames(assistMatch ? assistMatch[1] : '')
+  };
+}
+
+function PaletteBar({ hexes, colorNames }) {
+  if (!hexes || hexes.length === 0) return null;
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '3rem',
+        borderRadius: '1rem',
+        overflow: 'hidden',
+        boxShadow: '0 2px 8px #e0e0e0',
+        display: 'flex'
+      }}
+    >
+      {hexes.map((hex, i) => (
+        <div
+          key={hex + i}
+          style={{ flex: 1, background: hex, height: '100%', cursor: 'pointer', position: 'relative' }}
+          title={colorNames?.[hex.toLowerCase()] || ''}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CustomVizSection({ node, ...props }) {
+  const Tag = node.tagName || 'h2';
+  return (
+    <Tag className="text-xl font-bold text-accent mt-2 mb-0.5 border-b-2 border-doodle pb-1" style={{letterSpacing: '0.05em', marginBottom: '0.25em'}} {...props} />
+  );
+}
+
+// 在 App 內部定義分組渲染
+const GroupedSection = ({children}) => (
+  <div className="mb-2">
+    {children}
+  </div>
+);
+
 function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -337,9 +405,9 @@ function App() {
             body: JSON.stringify({
               season: data.season,
               season_name: data.season_name,
-              skin_tone: data.color_names?.skin_tone || colorNameByHex(data.skin_tone, 'skin_tone'),
-              eye_color: data.color_names?.eye_color || colorNameByHex(data.eye_color, 'eye_color'),
-              hair_color: data.color_names?.hair_color || colorNameByHex(data.hair_color, 'hair_color'),
+              skin_tone: data.color_names?.[data.skin_tone?.toLowerCase()] || colorNameByHex(data.skin_tone, 'skin_tone'),
+              eye_color: data.color_names?.[data.eye_color?.toLowerCase()] || colorNameByHex(data.eye_color, 'eye_color'),
+              hair_color: data.color_names?.[data.hair_color?.toLowerCase()] || colorNameByHex(data.hair_color, 'hair_color'),
               color_suggestions: data.color_suggestions,
             }),
           });
@@ -422,6 +490,9 @@ function App() {
     }
   }, [result]);
 
+  // 在 ReactMarkdown 下方顯示主色/輔助色名稱
+  const paletteNames = extractMainAndAssistNames(suggestion);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 to-purple-200 py-8" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
       <div className="w-full flex flex-col items-center mx-auto">
@@ -451,24 +522,36 @@ function App() {
               // 成功顯示結果
               <>
                 <AnalysisResult result={normalizeResult(result)} colorNames={colorNames} />
+                {/* AI 可視化色板區塊 debug log */}
+                {console.log('AI建議內容', suggestion, extractPaletteHexes(suggestion))}
                 <div className="w-full mx-auto bg-card rounded-4xl shadow-xl p-10 space-y-6 border-2 border-doodle mt-8 text-black" style={{ maxWidth: '48rem' }}>
-                  <div className="font-bold text-2xl font-handwriting text-accent mb-4 text-center drop-shadow tracking-wider">AI 個人化色彩建議</div>
-                  <div className="prose prose-zinc max-w-none whitespace-pre-line" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
+                  <div className="font-bold text-2xl font-handwriting text-accent mb-4 text-center drop-shadow tracking-wider">個人化色彩建議</div>
+                  <div className="max-w-none whitespace-pre-line space-y-2" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
                     <ReactMarkdown
                       components={{
                         h2: ({node, ...props}) => (
-                          <h2
-                            className="text-xl font-bold text-accent mt-8 mb-2 border-b-2 border-doodle pb-1"
-                            style={{letterSpacing: '0.05em'}}
-                            {...props}
-                          />
+                          <GroupedSection>
+                            <h2 className="text-base font-bold text-accent mt-2 mb-0.5 border-b-2 border-doodle pb-1" style={{letterSpacing: '0.05em', marginBottom: '0.25em'}} {...props} />
+                          </GroupedSection>
                         ),
                         h3: ({node, ...props}) => (
-                          <h3
-                            className="text-lg font-semibold text-doodle mt-6 mb-2"
-                            style={{letterSpacing: '0.03em'}}
-                            {...props}
-                          />
+                          <GroupedSection>
+                            <h3 className="text-base font-bold text-accent mt-2 mb-0.5" style={{letterSpacing: '0.03em', marginBottom: '0.25em'}} {...props} />
+                          </GroupedSection>
+                        ),
+                        h4: ({node, ...props}) => (
+                          <GroupedSection>
+                            <h4 className="text-base font-bold text-accent mt-2 mb-0.5" style={{letterSpacing: '0.03em', marginBottom: '0.25em'}} {...props} />
+                          </GroupedSection>
+                        ),
+                        p: ({node, ...props}) => (
+                          <p className="text-base leading-normal my-1" style={{marginTop: '0.25em', marginBottom: '0.25em'}} {...props} />
+                        ),
+                        ul: ({node, ...props}) => (
+                          <ul className="my-1 pl-6 list-none" style={{marginTop: '0.25em', marginBottom: '0.25em', paddingLeft: '1.5em'}} {...props} />
+                        ),
+                        li: ({node, ...props}) => (
+                          <li className="list-none pl-0" style={{listStyle: 'none', paddingLeft: 0, margin: 0}} {...props} />
                         ),
                       }}
                     >
