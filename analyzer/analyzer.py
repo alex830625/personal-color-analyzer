@@ -14,6 +14,8 @@ import bz2
 import google.generativeai as genai
 import json
 import re
+from bisenet import load_bisenet_model
+import torch
 
 app = Flask(__name__)
 CORS(app)
@@ -23,6 +25,13 @@ UPLOADS_DIR = os.path.join(os.path.dirname(__file__), 'uploads')
 DEBUG_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'debug_output')
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
+
+WEIGHT_PATH = os.path.join(os.path.dirname(__file__), '79999_iter.pth')
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+bisenet_model = load_bisenet_model(WEIGHT_PATH, device=DEVICE, n_classes=19)
+
+print("模型權重路徑：", WEIGHT_PATH)
+print("檔案是否存在：", os.path.exists(WEIGHT_PATH))
 
 def download_dlib_model():
     """下載 dlib 臉部特徵點模型"""
@@ -206,32 +215,21 @@ def extract_lip_region(image, landmarks):
         cv2.fillConvexPoly(mask, hull, 255)
         return mask
 
-def extract_hair_region(image, landmarks, face_rect):
-    """提取頭髮區域 (估計)"""
-    if landmarks is None:
-        return None
-    
-    # 建立一個全黑的遮罩
-    mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    
-    # 臉部邊界
-    face_x, face_y, face_w, face_h = face_rect.left(), face_rect.top(), face_rect.width(), face_rect.height()
-
-    # 估計頭髮區域在臉部上方
-    hair_y_start = max(0, face_y - int(face_h * 0.5))
-    hair_y_end = face_y + int(face_h * 0.2)
-    hair_x_start = max(0, face_x - int(face_w * 0.1))
-    hair_x_end = min(image.shape[1], face_x + face_w + int(face_w * 0.1))
-
-    # 繪製頭髮區域矩形
-    cv2.rectangle(mask, (hair_x_start, hair_y_start), (hair_x_end, hair_y_end), 255, -1)
-
-    # 從頭髮區域中移除臉部區域
-    points = get_landmark_points(landmarks)
-    face_hull = cv2.convexHull(np.array(points[0:27], dtype=np.int32))
-    cv2.fillConvexPoly(mask, face_hull, 0)
-    
-    return mask
+def extract_hair_mask_bisenet(image):
+    import cv2
+    import torch
+    h, w = image.shape[:2]
+    # BiSeNet 輸入需 512x512
+    img_resized = cv2.resize(image, (512, 512))
+    img_tensor = torch.from_numpy(img_resized.transpose(2, 0, 1)).unsqueeze(0).float().to(DEVICE) / 255.0
+    with torch.no_grad():
+        out = bisenet_model(img_tensor)[0]
+        parsing = out.squeeze(0).cpu().numpy().argmax(0)
+    # 取出頭髮區域
+    hair_mask = (parsing == 17).astype(np.uint8) * 255
+    # 還原到原圖大小
+    hair_mask_full = cv2.resize(hair_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+    return hair_mask_full
 
 def gray_world_white_balance(img):
     # 灰世界假設自動白平衡
@@ -256,6 +254,14 @@ def mask_skin_pixels(image, mask):
     upper = np.array([255, 173, 127], dtype=np.uint8)
     skin_mask = cv2.inRange(ycrcb, lower, upper)
     combined = cv2.bitwise_and(mask, skin_mask)
+    # Debug: 印出膚色像素數量與平均 BGR
+    skin_pixels = image[combined > 0]
+    print(f"[膚色過濾 debug] 膚色像素數量: {len(skin_pixels)}")
+    if len(skin_pixels) > 0:
+        mean_bgr = np.mean(skin_pixels, axis=0)
+        print(f"[膚色過濾 debug] 膚色像素平均 BGR: {mean_bgr}")
+    else:
+        print("[膚色過濾 debug] 無膚色像素")
     return combined
 
 def calculate_skin_tone(image, landmarks):
@@ -317,7 +323,7 @@ def calculate_skin_tone(image, landmarks):
     final_L = (means['left_cheek'][0] * 0.2 + means['right_cheek'][0] * 0.2 + means['forehead'][0] * 0.2 + means['nose'][0] * 0.2 + means['chin'][0] * 0.2)
     final_A = (means['left_cheek'][1] * 0.2 + means['right_cheek'][1] * 0.2 + means['forehead'][1] * 0.2 + means['nose'][1] * 0.2 + means['chin'][1] * 0.2)
     final_B = (means['left_cheek'][2] * 0.2 + means['right_cheek'][2] * 0.2 + means['forehead'][2] * 0.2 + means['nose'][2] * 0.2 + means['chin'][2] * 0.2)
-    # 5. 轉回 BGR，再轉 RGB
+    # 5. 直接用 OpenCV LAB（不做縮放/偏移）
     avg_lab = np.uint8([[[final_L, final_A, final_B]]])
     avg_bgr = cv2.cvtColor(avg_lab, cv2.COLOR_LAB2BGR)[0,0]
     avg_rgb = (int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0]))
@@ -371,6 +377,36 @@ def create_debug_image_dlib(image, face_rect, skin_mask, eye_masks, lip_mask, ha
     # 儲存偵錯圖
     cv2.imwrite(output_path, debug_img)
     print(f"✅ 偵錯圖已儲存至: {output_path}")
+
+def create_debug_mask_image(image, skin_mask=None, eye_masks=None, lip_mask=None, hair_mask=None, output_path='debug_mask.png'):
+    debug_img = image.copy()
+    # 定義顏色 (BGR)
+    SKIN_COLOR = (0, 255, 255)  # 黃
+    EYE_COLOR = (255, 0, 0)     # 藍
+    LIP_COLOR = (0, 0, 255)     # 紅
+    HAIR_COLOR = (128, 0, 128)  # 紫
+    # Debug: 輸出 hair_mask 的唯一值
+    print('hair_mask unique:', np.unique(hair_mask) if hair_mask is not None else None)
+    # 疊加遮罩
+    if skin_mask is not None:
+        skin_overlay = np.zeros_like(debug_img)
+        skin_overlay[skin_mask == 255] = SKIN_COLOR
+        cv2.addWeighted(debug_img, 1, skin_overlay, 0.4, 0, debug_img)
+    if eye_masks:
+        for eye_mask in eye_masks:
+            eye_overlay = np.zeros_like(debug_img)
+            eye_overlay[eye_mask == 255] = EYE_COLOR
+            cv2.addWeighted(debug_img, 1, eye_overlay, 0.6, 0, debug_img)
+    if lip_mask is not None:
+        lip_overlay = np.zeros_like(debug_img)
+        lip_overlay[lip_mask == 255] = LIP_COLOR
+        cv2.addWeighted(debug_img, 1, lip_overlay, 0.5, 0, debug_img)
+    if hair_mask is not None:
+        hair_overlay = np.zeros_like(debug_img)
+        hair_overlay[hair_mask == 255] = HAIR_COLOR
+        cv2.addWeighted(debug_img, 1, hair_overlay, 0.4, 0, debug_img)
+    cv2.imwrite(output_path, debug_img)
+    print(f"✅ 遮罩圖已儲存至: {output_path}")
 
 def analyze_seasonal_colors(skin_tone, eye_color, hair_color):
     """分析季節性色彩"""
@@ -487,7 +523,17 @@ def analyze():
         
         eye_masks = extract_eye_regions(image, landmarks)
         lip_mask = extract_lip_region(image, landmarks)
-        hair_mask = extract_hair_region(image, landmarks, face)
+        hair_mask = extract_hair_mask_bisenet(image)
+        if hair_mask is not None:
+            debug_hair_mask_path = os.path.join(DEBUG_OUTPUT_DIR, f"hair_mask_{uuid.uuid4().hex}.png")
+            cv2.imwrite(debug_hair_mask_path, hair_mask)
+            print(f"hair_mask saved to: {debug_hair_mask_path}, unique: {np.unique(hair_mask)}")
+        if hair_mask is None:
+            hair_mask = extract_hair_region(image, landmarks, face)
+            if hair_mask is not None:
+                debug_hair_mask_path = os.path.join(DEBUG_OUTPUT_DIR, f"hair_mask_fallback_{uuid.uuid4().hex}.png")
+                cv2.imwrite(debug_hair_mask_path, hair_mask)
+                print(f"hair_mask (fallback) saved to: {debug_hair_mask_path}, unique: {np.unique(hair_mask)}")
         
         all_eye_colors = []
         if eye_masks:
@@ -511,12 +557,17 @@ def analyze():
         season, analysis_details = analyze_seasonal_colors(skin_tone, eye_color, hair_color)
 
         # --- 5. Create Debug Image ---
-        # 為了除錯，我們使用舊的 extract_skin_region 來產生一個完整的皮膚遮罩用於視覺化
         skin_mask_for_debug = extract_skin_region(image, landmarks)
         debug_image_filename = f"debug_{uuid.uuid4().hex}.jpg"
         debug_image_path = os.path.join(DEBUG_OUTPUT_DIR, debug_image_filename)
         create_debug_image_dlib(image, face, skin_mask_for_debug, eye_masks, lip_mask, hair_mask, debug_image_path)
         debug_image_url = f"/debug/{debug_image_filename}"
+
+        # --- 5.1. Create Debug Mask Image (for front-end overlay) ---
+        debug_mask_filename = f"debug_mask_{uuid.uuid4().hex}.png"
+        debug_mask_path = os.path.join(DEBUG_OUTPUT_DIR, debug_mask_filename)
+        create_debug_mask_image(image, skin_mask_for_debug, eye_masks, lip_mask, hair_mask, debug_mask_path)
+        debug_mask_url = f"/debug/{debug_mask_filename}"
 
         # --- 6. Prepare Response ---
         response_data = {
@@ -530,6 +581,7 @@ def analyze():
             "color_suggestions": get_color_palette(season),
             "analysis_details": analysis_details,
             "debug_image_url": debug_image_url,
+            "debug_mask_url": debug_mask_url,
             "debug_error": ""
         }
         return jsonify(response_data)

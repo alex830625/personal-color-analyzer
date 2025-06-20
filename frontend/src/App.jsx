@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './index.css';
 
@@ -195,6 +195,93 @@ function cleanSuggestion(text) {
   return result.join('\n\n');
 }
 
+// 分析結果卡片
+function AnalysisResult({ result, colorNames }) {
+  if (!result) return null;
+  const { skinColor, hairColor, eyeColor, season, clothesColors, makeupColors, jewelryColors, avoidColors } = result;
+  return (
+    <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8 space-y-8">
+      <h2 className="text-2xl font-bold text-center mb-4">分析結果</h2>
+      {/* 基本色調區塊 */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className="text-gray-500">肌膚色調</div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg border" style={{background: skinColor.hex}} />
+            <span className="font-semibold">{colorNames[skinColor.hex?.toLowerCase()] || skinColor.name || '未知色'}</span>
+          </div>
+        </div>
+        <div>
+          <div className="text-gray-500">頭髮顏色</div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg border" style={{background: hairColor.hex}} />
+            <span className="font-semibold">{colorNames[hairColor.hex?.toLowerCase()] || hairColor.name || '未知色'}</span>
+          </div>
+        </div>
+        <div>
+          <div className="text-gray-500">眼睛顏色</div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg border" style={{background: eyeColor.hex}} />
+            <span className="font-semibold">{colorNames[eyeColor.hex?.toLowerCase()] || eyeColor.name || '未知色'}</span>
+          </div>
+        </div>
+        <div>
+          <div className="text-gray-500">季節性色彩</div>
+          <div className="font-semibold">{season}</div>
+        </div>
+      </div>
+      {/* 衣服顏色建議 */}
+      <div>
+        <div className="font-semibold mb-2">衣服顏色建議：</div>
+        <div className="flex flex-wrap gap-3">
+          {clothesColors?.map((c, i) => (
+            <div key={c.hex ? c.hex : `clothes-${i}`} className="flex flex-col items-center">
+              <div className="w-10 h-10 rounded-lg border shadow" style={{background: c.hex}} />
+              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 化妝顏色建議 */}
+      <div>
+        <div className="font-semibold mb-2">化妝顏色建議：</div>
+        <div className="flex flex-wrap gap-3">
+          {makeupColors?.map((c, i) => (
+            <div key={c.hex ? c.hex : `makeup-${i}`} className="flex flex-col items-center">
+              <div className="w-10 h-10 rounded-lg border shadow" style={{background: c.hex}} />
+              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 珠寶顏色建議 */}
+      <div>
+        <div className="font-semibold mb-2">珠寶飾品建議：</div>
+        <div className="flex flex-wrap gap-3">
+          {jewelryColors?.map((c, i) => (
+            <div key={c.hex ? c.hex : `jewelry-${i}`} className="flex flex-col items-center">
+              <div className="w-10 h-10 rounded-lg border shadow" style={{background: c.hex}} />
+              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 避免色區塊 */}
+      <div>
+        <div className="font-semibold mb-2 text-red-500">避免使用的顏色：</div>
+        <div className="flex flex-wrap gap-3">
+          {avoidColors?.map((c, i) => (
+            <div key={c.hex ? c.hex : `avoid-${i}`} className="flex flex-col items-center">
+              <div className="w-10 h-10 rounded-lg border-2 border-red-300 shadow" style={{background: c.hex}} />
+              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -203,6 +290,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState('');
   const [rawResponse, setRawResponse] = useState(null);
+  const [colorNames, setColorNames] = useState({});
 
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
@@ -284,6 +372,54 @@ function App() {
     return getColorName(hex);
   }
 
+  // 將 Gemini 回傳的 color_names 物件用於色碼轉中文名，主色資訊同時保留 hex 與 name
+  function normalizeResult(result) {
+    if (!result) return null;
+    const colorNames = result.color_names || {};
+    const getColorName = hex => colorNames[hex?.toLowerCase()] || colorNames[hex?.toUpperCase()] || '';
+    const getColors = arr => (arr || []).map(hex => ({
+      name: getColorName(hex),
+      hex
+    }));
+    return {
+      skinColor: { name: getColorName(result.skin_tone), hex: result.skin_tone },
+      hairColor: { name: getColorName(result.hair_color), hex: result.hair_color },
+      eyeColor: { name: getColorName(result.eye_color), hex: result.eye_color },
+      season: result.season_name || result.season,
+      clothesColors: getColors(result.color_suggestions?.clothes),
+      makeupColors: getColors(result.color_suggestions?.makeup),
+      jewelryColors: getColors(result.color_suggestions?.jewelry),
+      avoidColors: getColors(result.color_suggestions?.avoid),
+    };
+  }
+
+  // 在 normalizeResult 前印出 Gemini 回傳的原始資料
+  if (result) {
+    console.log('分析結果原始資料', result);
+  }
+
+  // 取得所有色碼並查詢色名
+  useEffect(() => {
+    if (!result) return;
+    const allHexes = [
+      ...(result.color_suggestions?.clothes || []),
+      ...(result.color_suggestions?.makeup || []),
+      ...(result.color_suggestions?.jewelry || []),
+      ...(result.color_suggestions?.avoid || []),
+    ].filter(Boolean);
+    const uniqueHexes = Array.from(new Set(allHexes.map(h => h?.toLowerCase())));
+    if (uniqueHexes.length > 0) {
+      fetch('/api/color-names', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hexes: uniqueHexes })
+      })
+        .then(res => res.json())
+        .then(setColorNames)
+        .catch(() => setColorNames({}));
+    }
+  }, [result]);
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-100 via-pink-100 to-blue-100 px-2">
       <div className="w-full max-w-xl flex flex-col items-center">
@@ -312,48 +448,7 @@ function App() {
               // 成功顯示結果
               <>
                 <h2 className="text-xl font-semibold mb-2 text-center">分析結果</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 mb-4">
-                  <div className="flex items-center">
-                    肌膚色調：
-                    <div className="w-8 h-8 rounded shadow border mx-2 hover:scale-110 hover:ring-2 hover:ring-blue-300 transition-all duration-200" style={{ backgroundColor: result.skin_tone }} />
-                    <span className="font-bold">{colorNameByHex(result.skin_tone, 'skin_tone')}</span>
-                  </div>
-                  <div className="flex items-center">
-                    眼睛顏色：
-                    <div className="w-8 h-8 rounded shadow border mx-2 hover:scale-110 hover:ring-2 hover:ring-blue-300 transition-all duration-200" style={{ backgroundColor: result.eye_color }} />
-                    <span className="font-bold">{colorNameByHex(result.eye_color, 'eye_color')}</span>
-                  </div>
-                  <div className="flex items-center">
-                    頭髮顏色：
-                    <div className="w-8 h-8 rounded shadow border mx-2 hover:scale-110 hover:ring-2 hover:ring-blue-300 transition-all duration-200" style={{ backgroundColor: result.hair_color }} />
-                    <span className="font-bold">{colorNameByHex(result.hair_color, 'hair_color')}</span>
-                  </div>
-                  <div className="flex items-center">
-                    季節性色彩：
-                    <div className="w-8 h-8 rounded shadow border mx-2 hover:scale-110 hover:ring-2 hover:ring-blue-300 transition-all duration-200" style={{ backgroundColor: result.color_suggestions?.clothes?.[0] || '#fff' }} />
-                    <span className="font-bold">{result.season_name || seasonNameMap[result.season] || result.season}</span>
-                  </div>
-                </div>
-                <div className="mb-2">衣服顏色建議：
-                  <div className="flex flex-wrap mt-1">
-                    {result.color_suggestions?.clothes?.map((c, i) => <div key={i} className="flex flex-col items-center mr-2 mb-2"><ColorBox color={c} /><span className="text-xs mt-1">{colorNameByHex(c)}</span></div>)}
-                  </div>
-                </div>
-                <div className="mb-2">化妝顏色建議：
-                  <div className="flex flex-wrap mt-1">
-                    {result.color_suggestions?.makeup?.map((c, i) => <div key={i} className="flex flex-col items-center mr-2 mb-2"><ColorBox color={c} /><span className="text-xs mt-1">{colorNameByHex(c)}</span></div>)}
-                  </div>
-                </div>
-                <div className="mb-2">珠寶&飾品建議：
-                  <div className="flex flex-wrap mt-1">
-                    {result.color_suggestions?.jewelry?.map((c, i) => <div key={i} className="flex flex-col items-center mr-2 mb-2"><ColorBox color={c} /><span className="text-xs mt-1">{colorNameByHex(c)}</span></div>)}
-                  </div>
-                </div>
-                <div className="mb-2">避免使用的顏色：
-                  <div className="flex flex-wrap mt-1">
-                    {result.color_suggestions?.avoid?.map((c, i) => <div key={i} className="flex flex-col items-center mr-2 mb-2"><ColorBox color={c} /><span className="text-xs mt-1">{colorNameByHex(c)}</span></div>)}
-                  </div>
-                </div>
+                <AnalysisResult result={normalizeResult(result)} colorNames={colorNames} />
                 <div className="mt-4 p-4 bg-blue-50 rounded text-black min-h-[60px]">
                   <div className="font-bold mb-2">AI 個人化色彩建議：</div>
                   <ReactMarkdown

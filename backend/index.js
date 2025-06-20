@@ -72,6 +72,37 @@ app.post('/api/gemini-suggestion', async (req, res) => {
   }
 });
 
+app.post('/api/color-names', async (req, res) => {
+  try {
+    const { hexes } = req.body;
+    if (!Array.isArray(hexes) || hexes.length === 0) {
+      return res.status(400).json({ error: '缺少 hexes 陣列' });
+    }
+    // 組 prompt
+    const prompt = `請將以下 HEX 色碼轉為繁體中文顏色名稱，回傳 JSON 格式（key 為色碼，value 為繁體中文名稱）：\n${JSON.stringify(hexes)}\n只回傳 JSON，不要多餘說明。`;
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+    });
+    // 印出 Gemini 回傳原始內容
+    console.log('Gemini 回傳原始內容:', response.text);
+    // 嘗試解析 Gemini 回傳的 JSON
+    let colorNames = {};
+    try {
+      // 只取出第一個 { ... } JSON 區塊
+      const match = response.text.match(/\{[\s\S]*\}/);
+      if (match) {
+        colorNames = JSON.parse(match[0]);
+      }
+    } catch (e) {
+      return res.status(500).json({ error: 'Gemini 回傳格式解析失敗', details: e.message, raw: response.text });
+    }
+    res.json(colorNames);
+  } catch (err) {
+    res.status(500).json({ error: 'Gemini 取得色名失敗', details: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
 });
