@@ -202,8 +202,6 @@ function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState('');
-  const [debugImageUrl, setDebugImageUrl] = useState('');
-  const [debugError, setDebugError] = useState('');
   const [rawResponse, setRawResponse] = useState(null);
 
   const handlePhotoChange = (e) => {
@@ -214,8 +212,6 @@ function App() {
       setResult(null);
       setError('');
       setSuggestion('');
-      setDebugImageUrl('');
-      setDebugError('');
       setRawResponse(null);
     }
   };
@@ -226,8 +222,6 @@ function App() {
     setError('');
     setResult(null);
     setSuggestion('');
-    setDebugImageUrl('');
-    setDebugError('');
     setRawResponse(null);
     
     const formData = new FormData();
@@ -244,12 +238,6 @@ function App() {
       
       if (res.ok) {
         setResult(data);
-        if (data.debug_image_url) {
-          setDebugImageUrl(`http://localhost:5001${data.debug_image_url}`);
-        }
-        if (data.debug_error) {
-          setDebugError(data.debug_error);
-        }
         // 呼叫 GPT API
         setSuggestion('');
         try {
@@ -297,19 +285,25 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-pink-100 to-blue-100 px-2">
-      <div className="w-full max-w-2xl flex flex-col items-center">
-        <h1 className="text-3xl font-bold mb-4 text-black text-center">個人色彩分析</h1>
-        <div className="w-full bg-white rounded-lg shadow-xl p-6">
-          <input type="file" accept="image/*" onChange={handlePhotoChange} className="mb-4" />
-          {preview && <img src={preview} alt="預覽" className="w-40 h-40 object-cover rounded mb-4" />}
-          <button onClick={handleAnalyze} disabled={!file || loading} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 hover:scale-105 transition-all duration-200 disabled:opacity-50 w-full">
-            {loading ? '分析中...' : '上傳並分析'}
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-100 via-pink-100 to-blue-100 px-2">
+      <div className="w-full max-w-xl flex flex-col items-center">
+        <h1 className="text-4xl font-extrabold tracking-wide mb-8 text-black text-center drop-shadow-lg">個人色彩分析</h1>
+        <div className="w-full bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center">
+          <label htmlFor="photo-upload" className="mb-6 cursor-pointer inline-block px-6 py-3 bg-gradient-to-r from-indigo-400 to-pink-400 text-white font-semibold rounded-lg shadow-md hover:from-pink-400 hover:to-indigo-400 transition-all duration-300 text-lg">
+            選擇檔案
+            <input id="photo-upload" type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
+          </label>
+          {preview && <img src={preview} alt="預覽" className="w-40 h-40 object-cover rounded-xl mb-6 shadow-md border-2 border-indigo-200" />}
+          <button onClick={handleAnalyze} disabled={!file || loading} className="w-full py-3 rounded-lg text-lg font-bold bg-gradient-to-r from-blue-400 to-indigo-400 text-white shadow-lg hover:from-indigo-400 hover:to-blue-400 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
+            {loading ? (
+              <>
+                <span className="spinner"></span>分析中...
+              </>
+            ) : (
+              '上傳並分析'
+            )}
           </button>
         </div>
-
-        {/* 分析中提示 */}
-        {loading && <div className="text-center mt-8">分析中，請稍候...</div>}
 
         {/* 結果與失敗反饋區塊 */}
         {!loading && (result || error) && (
@@ -364,32 +358,14 @@ function App() {
                   <div className="font-bold mb-2">AI 個人化色彩建議：</div>
                   <ReactMarkdown
                     components={{
+                      h2: ({node, ...props}) => <h2 style={{fontSize: '1.5rem', fontWeight: 'bold', marginTop: '1em', marginBottom: '1em'}} {...props} />,
+                      h3: ({node, ...props}) => <h3 style={{fontSize: '1.2rem', fontWeight: 'bold', marginTop: '1em', marginBottom: '0.5em'}} {...props} />,
                       p: ({node, ...props}) => <p style={{marginTop: '1em', marginBottom: '1em'}} {...props} />
                     }}
                   >
                     {cleanSuggestion(suggestion)}
                   </ReactMarkdown>
                 </div>
-
-                {/* 視覺化偵錯區塊 */}
-                {(debugImageUrl || debugError) && (
-                  <div className="mt-6 border-t pt-6">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-4">視覺化偵錯</h3>
-                    {debugImageUrl ? (
-                      <>
-                        <p className="text-sm text-gray-500 mb-2">
-                          AI 辨識區域：<span className="text-green-600 font-bold">綠色-臉部</span>, <span className="text-red-600 font-bold">紅色-皮膚</span>, <span className="text-blue-600 font-bold">藍色-眼睛</span>, <span className="text-yellow-500 font-bold">黃色-頭髮</span>。
-                        </p>
-                        <img src={debugImageUrl} alt="偵錯分析圖" className="rounded-lg shadow-md w-full" />
-                      </>
-                    ) : (
-                      <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded" role="alert">
-                        <p className="font-bold">無法產生偵錯圖</p>
-                        <p className="text-sm">{debugError}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
               </>
             ) : (
               // 失敗顯示反饋
@@ -402,20 +378,6 @@ function App() {
                     <p>{error}</p>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Collapsible Raw Response Viewer */}
-            {rawResponse && (
-              <div className="mt-6 border-t pt-4">
-                <details>
-                  <summary className="cursor-pointer text-sm font-semibold text-gray-600 hover:text-black">
-                    顯示/隱藏 後端原始回應
-                  </summary>
-                  <pre className="mt-2 p-4 bg-gray-100 rounded-lg text-xs overflow-auto">
-                    {JSON.stringify(rawResponse, null, 2)}
-                  </pre>
-                </details>
               </div>
             )}
           </div>
