@@ -1,0 +1,7 @@
+Flask
+Flask-Cors
+numpy
+opencv-python
+scikit-learn
+dlib
+# 註解: dlib 已成功安裝，現在使用 dlib 進行高精度的臉部特徵點偵測和分析 

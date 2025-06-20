@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+build/
+
+# VSCode
+.vscode/
+
+# 系統檔案
+.DS_Store
+Thumbs.db
+
+# 其他
+*.log
+uploads/
+debug_output/ 
