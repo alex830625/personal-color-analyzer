@@ -167,7 +167,7 @@ const seasonNameMap = {
 
 function ColorBox({ color }) {
   return (
-    <div className="w-8 h-8 rounded shadow border m-1" style={{ backgroundColor: color }} title={color}></div>
+    <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: color}} title={color}></div>
   );
 }
 
@@ -200,10 +200,11 @@ function AnalysisResult({ result, colorNames }) {
   if (!result) return null;
   const { skinColor, hairColor, eyeColor, season, clothesColors, makeupColors, jewelryColors, avoidColors } = result;
   return (
-    <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8 space-y-8">
-      <h2 className="text-2xl font-bold text-center mb-4">分析結果</h2>
+    <div className="w-full mx-auto bg-card rounded-4xl shadow-xl p-10 space-y-10 border-2 border-doodle" style={{ maxWidth: '48rem', fontFamily: 'Noto Sans TC, sans-serif' }}>
+      {/* 分析結果標題 */}
+      <div className="text-3xl font-handwriting text-accent mb-6 text-center drop-shadow tracking-wider">分析結果</div>
       {/* 基本色調區塊 */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 justify-items-center items-center text-center">
         <div>
           <div className="text-gray-500">肌膚色調</div>
           <div className="flex items-center gap-2">
@@ -230,49 +231,50 @@ function AnalysisResult({ result, colorNames }) {
           <div className="font-semibold">{season}</div>
         </div>
       </div>
+      <hr className="my-8 border-t-2 border-doodle border-dashed" />
       {/* 衣服顏色建議 */}
-      <div>
+      <div className="text-center">
         <div className="font-semibold mb-2">衣服顏色建議：</div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 justify-center">
           {clothesColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `clothes-${i}`} className="flex flex-col items-center">
-              <div className="w-10 h-10 rounded-lg border shadow" style={{background: c.hex}} />
+              <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: c.hex}} />
               <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
       </div>
       {/* 化妝顏色建議 */}
-      <div>
+      <div className="text-center">
         <div className="font-semibold mb-2">化妝顏色建議：</div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 justify-center">
           {makeupColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `makeup-${i}`} className="flex flex-col items-center">
-              <div className="w-10 h-10 rounded-lg border shadow" style={{background: c.hex}} />
+              <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: c.hex}} />
               <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
       </div>
       {/* 珠寶顏色建議 */}
-      <div>
+      <div className="text-center">
         <div className="font-semibold mb-2">珠寶飾品建議：</div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 justify-center">
           {jewelryColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `jewelry-${i}`} className="flex flex-col items-center">
-              <div className="w-10 h-10 rounded-lg border shadow" style={{background: c.hex}} />
+              <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: c.hex}} />
               <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
       </div>
       {/* 避免色區塊 */}
-      <div>
+      <div className="text-center">
         <div className="font-semibold mb-2 text-red-500">避免使用的顏色：</div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 justify-center">
           {avoidColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `avoid-${i}`} className="flex flex-col items-center">
-              <div className="w-10 h-10 rounded-lg border-2 border-red-300 shadow" style={{background: c.hex}} />
+              <div className="w-12 h-12 rounded-3xl border-2 border-red-300 shadow" style={{background: c.hex}} />
               <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
@@ -421,23 +423,24 @@ function App() {
   }, [result]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-100 via-pink-100 to-blue-100 px-2">
-      <div className="w-full max-w-xl flex flex-col items-center">
-        <h1 className="text-4xl font-extrabold tracking-wide mb-8 text-black text-center drop-shadow-lg">個人色彩分析</h1>
-        <div className="w-full bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center">
+    <div className="min-h-screen bg-gradient-to-br from-pink-100 to-purple-200 py-8" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
+      <div className="w-full flex flex-col items-center mx-auto">
+        <h1 className="text-5xl font-handwriting text-accent mb-10 text-center drop-shadow-lg tracking-wider">個人色彩分析</h1>
+        <div className="w-full max-w-md bg-card rounded-4xl shadow-xl p-10 flex flex-col items-center border-2 border-doodle mb-8"
+             style={{ maxWidth: '48rem' }}>
           <label htmlFor="photo-upload" className="mb-6 cursor-pointer inline-block px-6 py-3 bg-gradient-to-r from-indigo-400 to-pink-400 text-white font-semibold rounded-lg shadow-md hover:from-pink-400 hover:to-indigo-400 transition-all duration-300 text-lg">
             選擇檔案
-            <input id="photo-upload" type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
+            <input id="photo-upload" accept="image/*" className="hidden" type="file" onChange={handlePhotoChange} />
           </label>
-          {preview && <img src={preview} alt="預覽" className="w-40 h-40 object-cover rounded-xl mb-6 shadow-md border-2 border-indigo-200" />}
-          <button onClick={handleAnalyze} disabled={!file || loading} className="w-full py-3 rounded-lg text-lg font-bold bg-gradient-to-r from-blue-400 to-indigo-400 text-white shadow-lg hover:from-indigo-400 hover:to-blue-400 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? (
-              <>
-                <span className="spinner"></span>分析中...
-              </>
-            ) : (
-              '上傳並分析'
-            )}
+          {preview && (
+            <img alt="預覽" className="w-56 h-56 object-cover rounded-xl mb-6 shadow-md border-2 border-indigo-200" src={preview} />
+          )}
+          <button
+            className="w-full py-3 rounded-lg text-lg font-bold bg-gradient-to-r from-blue-400 to-indigo-400 text-white shadow-lg hover:from-indigo-400 hover:to-blue-400 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleAnalyze}
+            disabled={loading || !preview}
+          >
+            {loading ? '分析中...' : '上傳並分析'}
           </button>
         </div>
 
@@ -447,19 +450,12 @@ function App() {
             {result ? (
               // 成功顯示結果
               <>
-                <h2 className="text-xl font-semibold mb-2 text-center">分析結果</h2>
                 <AnalysisResult result={normalizeResult(result)} colorNames={colorNames} />
-                <div className="mt-4 p-4 bg-blue-50 rounded text-black min-h-[60px]">
-                  <div className="font-bold mb-2">AI 個人化色彩建議：</div>
-                  <ReactMarkdown
-                    components={{
-                      h2: ({node, ...props}) => <h2 style={{fontSize: '1.5rem', fontWeight: 'bold', marginTop: '1em', marginBottom: '1em'}} {...props} />,
-                      h3: ({node, ...props}) => <h3 style={{fontSize: '1.2rem', fontWeight: 'bold', marginTop: '1em', marginBottom: '0.5em'}} {...props} />,
-                      p: ({node, ...props}) => <p style={{marginTop: '1em', marginBottom: '1em'}} {...props} />
-                    }}
-                  >
-                    {cleanSuggestion(suggestion)}
-                  </ReactMarkdown>
+                <div className="w-full mx-auto bg-card rounded-4xl shadow-xl p-10 space-y-6 border-2 border-doodle mt-8 text-black" style={{ maxWidth: '48rem' }}>
+                  <div className="font-bold text-2xl font-handwriting text-accent mb-4 text-center drop-shadow tracking-wider">AI 個人化色彩建議</div>
+                  <div className="prose prose-zinc max-w-none whitespace-pre-line" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
+                    <ReactMarkdown>{suggestion}</ReactMarkdown>
+                  </div>
                 </div>
               </>
             ) : (
