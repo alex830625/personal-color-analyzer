@@ -235,11 +235,11 @@ function AnalysisResult({ result, colorNames }) {
       {/* 衣服顏色建議 */}
       <div className="text-center">
         <div className="font-semibold mb-2">衣服顏色建議：</div>
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className="flex flex-wrap gap-6 justify-center">
           {clothesColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `clothes-${i}`} className="flex flex-col items-center">
               <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: c.hex}} />
-              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+              <span className="text-base font-bold mt-2 text-gray-800">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
@@ -247,11 +247,11 @@ function AnalysisResult({ result, colorNames }) {
       {/* 化妝顏色建議 */}
       <div className="text-center">
         <div className="font-semibold mb-2">化妝顏色建議：</div>
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className="flex flex-wrap gap-6 justify-center">
           {makeupColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `makeup-${i}`} className="flex flex-col items-center">
               <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: c.hex}} />
-              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+              <span className="text-base font-bold mt-2 text-gray-800">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
@@ -259,11 +259,11 @@ function AnalysisResult({ result, colorNames }) {
       {/* 珠寶顏色建議 */}
       <div className="text-center">
         <div className="font-semibold mb-2">珠寶飾品建議：</div>
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className="flex flex-wrap gap-6 justify-center">
           {jewelryColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `jewelry-${i}`} className="flex flex-col items-center">
               <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: c.hex}} />
-              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+              <span className="text-base font-bold mt-2 text-gray-800">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
@@ -271,11 +271,11 @@ function AnalysisResult({ result, colorNames }) {
       {/* 避免色區塊 */}
       <div className="text-center">
         <div className="font-semibold mb-2 text-red-500">避免使用的顏色：</div>
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className="flex flex-wrap gap-6 justify-center">
           {avoidColors?.map((c, i) => (
             <div key={c.hex ? c.hex : `avoid-${i}`} className="flex flex-col items-center">
               <div className="w-12 h-12 rounded-3xl border-2 border-red-300 shadow" style={{background: c.hex}} />
-              <span className="text-xs mt-1 text-gray-600">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
+              <span className="text-base font-bold mt-2 text-gray-800">{colorNames[c.hex?.toLowerCase()] || c.name || '未知色'}</span>
             </div>
           ))}
         </div>
@@ -454,7 +454,26 @@ function App() {
                 <div className="w-full mx-auto bg-card rounded-4xl shadow-xl p-10 space-y-6 border-2 border-doodle mt-8 text-black" style={{ maxWidth: '48rem' }}>
                   <div className="font-bold text-2xl font-handwriting text-accent mb-4 text-center drop-shadow tracking-wider">AI 個人化色彩建議</div>
                   <div className="prose prose-zinc max-w-none whitespace-pre-line" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
-                    <ReactMarkdown>{suggestion}</ReactMarkdown>
+                    <ReactMarkdown
+                      components={{
+                        h2: ({node, ...props}) => (
+                          <h2
+                            className="text-xl font-bold text-accent mt-8 mb-2 border-b-2 border-doodle pb-1"
+                            style={{letterSpacing: '0.05em'}}
+                            {...props}
+                          />
+                        ),
+                        h3: ({node, ...props}) => (
+                          <h3
+                            className="text-lg font-semibold text-doodle mt-6 mb-2"
+                            style={{letterSpacing: '0.03em'}}
+                            {...props}
+                          />
+                        ),
+                      }}
+                    >
+                      {suggestion}
+                    </ReactMarkdown>
                   </div>
                 </div>
               </>
