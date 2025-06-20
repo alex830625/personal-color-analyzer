@@ -30,14 +30,10 @@ WEIGHT_PATH = os.path.join(os.path.dirname(__file__), '79999_iter.pth')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 bisenet_model = load_bisenet_model(WEIGHT_PATH, device=DEVICE, n_classes=19)
 
-print("模型權重路徑：", WEIGHT_PATH)
-print("檔案是否存在：", os.path.exists(WEIGHT_PATH))
-
 def download_dlib_model():
     """下載 dlib 臉部特徵點模型"""
     model_file = 'shape_predictor_68_face_landmarks.dat'
     if os.path.exists(model_file):
-        print("✅ dlib 模型檔案已存在")
         return True
     
     print("📥 正在下載 dlib 模型檔案...")
@@ -109,7 +105,6 @@ def get_dominant_colors(image, k=1, mask=None):
 def detect_face_landmarks(image):
     """檢測臉部特徵點"""
     if predictor is None:
-        print("❌ dlib 模型未載入，無法進行臉部特徵點檢測")
         return None, None
     
     # 轉換為灰度圖
@@ -256,12 +251,10 @@ def mask_skin_pixels(image, mask):
     combined = cv2.bitwise_and(mask, skin_mask)
     # Debug: 印出膚色像素數量與平均 BGR
     skin_pixels = image[combined > 0]
-    print(f"[膚色過濾 debug] 膚色像素數量: {len(skin_pixels)}")
     if len(skin_pixels) > 0:
         mean_bgr = np.mean(skin_pixels, axis=0)
-        print(f"[膚色過濾 debug] 膚色像素平均 BGR: {mean_bgr}")
     else:
-        print("[膚色過濾 debug] 無膚色像素")
+        pass
     return combined
 
 def calculate_skin_tone(image, landmarks):
@@ -328,11 +321,6 @@ def calculate_skin_tone(image, landmarks):
     avg_bgr = cv2.cvtColor(avg_lab, cv2.COLOR_LAB2BGR)[0,0]
     avg_rgb = (int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0]))
     # Debug log
-    print("[膚色分析 debug]")
-    for k in means:
-        print(f"區域 {k} LAB: {means[k]}")
-    print(f"加權平均 LAB: ({final_L}, {final_A}, {final_B})")
-    print(f"最終 RGB: {avg_rgb}")
     return avg_rgb
 
 def create_debug_image_dlib(image, face_rect, skin_mask, eye_masks, lip_mask, hair_mask, output_path):
@@ -376,7 +364,6 @@ def create_debug_image_dlib(image, face_rect, skin_mask, eye_masks, lip_mask, ha
 
     # 儲存偵錯圖
     cv2.imwrite(output_path, debug_img)
-    print(f"✅ 偵錯圖已儲存至: {output_path}")
 
 def create_debug_mask_image(image, skin_mask=None, eye_masks=None, lip_mask=None, hair_mask=None, output_path='debug_mask.png'):
     debug_img = image.copy()
@@ -385,8 +372,6 @@ def create_debug_mask_image(image, skin_mask=None, eye_masks=None, lip_mask=None
     EYE_COLOR = (255, 0, 0)     # 藍
     LIP_COLOR = (0, 0, 255)     # 紅
     HAIR_COLOR = (128, 0, 128)  # 紫
-    # Debug: 輸出 hair_mask 的唯一值
-    print('hair_mask unique:', np.unique(hair_mask) if hair_mask is not None else None)
     # 疊加遮罩
     if skin_mask is not None:
         skin_overlay = np.zeros_like(debug_img)
@@ -406,7 +391,6 @@ def create_debug_mask_image(image, skin_mask=None, eye_masks=None, lip_mask=None
         hair_overlay[hair_mask == 255] = HAIR_COLOR
         cv2.addWeighted(debug_img, 1, hair_overlay, 0.4, 0, debug_img)
     cv2.imwrite(output_path, debug_img)
-    print(f"✅ 遮罩圖已儲存至: {output_path}")
 
 def analyze_seasonal_colors(skin_tone, eye_color, hair_color):
     """分析季節性色彩"""
@@ -527,13 +511,11 @@ def analyze():
         if hair_mask is not None:
             debug_hair_mask_path = os.path.join(DEBUG_OUTPUT_DIR, f"hair_mask_{uuid.uuid4().hex}.png")
             cv2.imwrite(debug_hair_mask_path, hair_mask)
-            print(f"hair_mask saved to: {debug_hair_mask_path}, unique: {np.unique(hair_mask)}")
         if hair_mask is None:
             hair_mask = extract_hair_region(image, landmarks, face)
             if hair_mask is not None:
                 debug_hair_mask_path = os.path.join(DEBUG_OUTPUT_DIR, f"hair_mask_fallback_{uuid.uuid4().hex}.png")
                 cv2.imwrite(debug_hair_mask_path, hair_mask)
-                print(f"hair_mask (fallback) saved to: {debug_hair_mask_path}, unique: {np.unique(hair_mask)}")
         
         all_eye_colors = []
         if eye_masks:
@@ -588,8 +570,6 @@ def analyze():
 
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        print(f"[!] Critical error in dlib analyze route: {e}")
         return jsonify({"error": f"伺服器在進階分析中發生嚴重錯誤: {e}"}), 500
     finally:
         # Clean up the uploaded file

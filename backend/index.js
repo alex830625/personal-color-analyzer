@@ -65,16 +65,13 @@ app.post('/api/gemini-suggestion', async (req, res) => {
 4. 💍 飾品建議（金屬色系與風格）
 段落前面不要有數字`;
 
-    console.log('Gemini Suggestion Prompt:', prompt);
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: prompt,
     });
-    console.log('Gemini 建議原始內容:', response.text);
     const suggestion = response.text;
     res.json({ suggestion });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Gemini 產生建議失敗', details: err.message });
   }
 });
@@ -91,8 +88,6 @@ app.post('/api/color-names', async (req, res) => {
       model: "gemini-2.0-flash",
       contents: prompt,
     });
-    // 印出 Gemini 回傳原始內容
-    console.log('Gemini 回傳原始內容:', response.text);
     // 嘗試解析 Gemini 回傳的 JSON
     let colorNames = {};
     try {

@@ -289,7 +289,6 @@ function extractPaletteHexes(suggestion) {
   if (!suggestion) return [];
   // 支援 ##/###/#### 可視化色板，允許標題前後有空格、冒號
   const vizSection = suggestion.match(/#+\s*可視化色板[：:]*[\s\S]*?(?=\n#+\s|$)/);
-  console.log('extractPaletteHexes - vizSection:', vizSection ? vizSection[0] : '無');
   if (!vizSection) return [];
   // 從該段落擷取 #XXXXXX
   const matches = vizSection[0].match(/#[0-9a-fA-F]{6}/g);
@@ -418,7 +417,6 @@ function App() {
             setSuggestion('無法取得建議，請稍後再試');
           }
         } catch {
-          console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY);
           setSuggestion('無法取得建議，請稍後再試');
         }
       } else {
@@ -461,11 +459,6 @@ function App() {
       jewelryColors: getColors(result.color_suggestions?.jewelry),
       avoidColors: getColors(result.color_suggestions?.avoid),
     };
-  }
-
-  // 在 normalizeResult 前印出 Gemini 回傳的原始資料
-  if (result) {
-    console.log('分析結果原始資料', result);
   }
 
   // 取得所有色碼並查詢色名
@@ -522,8 +515,6 @@ function App() {
               // 成功顯示結果
               <>
                 <AnalysisResult result={normalizeResult(result)} colorNames={colorNames} />
-                {/* AI 可視化色板區塊 debug log */}
-                {console.log('AI建議內容', suggestion, extractPaletteHexes(suggestion))}
                 <div className="w-full mx-auto bg-card rounded-4xl shadow-xl p-10 space-y-6 border-2 border-doodle mt-8 text-black" style={{ maxWidth: '48rem' }}>
                   <div className="font-bold text-2xl font-handwriting text-accent mb-4 text-center drop-shadow tracking-wider">個人化色彩建議</div>
                   <div className="max-w-none whitespace-pre-line space-y-2" style={{ fontFamily: 'Noto Sans TC, sans-serif' }}>
