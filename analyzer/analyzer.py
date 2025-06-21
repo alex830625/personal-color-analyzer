@@ -16,6 +16,9 @@ import json
 import re
 from bisenet import load_bisenet_model
 import torch
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 CORS(app)
@@ -28,7 +31,24 @@ os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
 
 WEIGHT_PATH = os.path.join(os.path.dirname(__file__), '79999_iter.pth')
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-bisenet_model = load_bisenet_model(WEIGHT_PATH, device=DEVICE, n_classes=19)
+
+# 全域模型快取
+_model_cache = {}
+_model_lock = threading.Lock()
+
+def get_bisenet_model():
+    """取得 BiSeNet 模型（使用快取）"""
+    with _model_lock:
+        if 'bisenet' not in _model_cache:
+            print("🔄 載入 BiSeNet 模型...")
+            start_time = time.time()
+            _model_cache['bisenet'] = load_bisenet_model(WEIGHT_PATH, device=DEVICE, n_classes=19)
+            print(f"✅ BiSeNet 模型載入完成，耗時 {time.time() - start_time:.2f} 秒")
+        return _model_cache['bisenet']
+
+# 預載入模型
+print("🚀 預載入 BiSeNet 模型...")
+get_bisenet_model()
 
 def download_dlib_model():
     """下載 dlib 臉部特徵點模型"""
@@ -68,6 +88,22 @@ if not download_dlib_model():
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor('shape_predictor_81_face_landmarks.dat')
 print("✅ dlib 模型載入成功")
+
+def optimize_image_size(image, max_size=1024):
+    """優化圖片尺寸以提升處理速度"""
+    height, width = image.shape[:2]
+    if max(height, width) <= max_size:
+        return image
+    
+    # 計算縮放比例
+    scale = max_size / max(height, width)
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+    
+    # 使用 INTER_AREA 進行縮放（適合縮小）
+    resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    print(f"📏 圖片已優化: {width}x{height} -> {new_width}x{new_height}")
+    return resized
 
 def rgb_to_hsv(rgb):
     """將RGB轉換為HSV"""
@@ -199,48 +235,89 @@ def extract_lip_region(image, landmarks):
     if len(points) >= 79:  # 81點模型
         lip_points = [*range(48, 68), *range(69, 79)]
         lip_pts = np.array([points[i] for i in lip_points if i < len(points)], dtype=np.int32)
-        hull = cv2.convexHull(lip_pts)
         mask = np.zeros(image.shape[:2], dtype=np.uint8)
-        cv2.fillConvexPoly(mask, hull, 255)
+        cv2.fillConvexPoly(mask, lip_pts, 255)
         return mask
     else:  # fallback 68點
         lip_points = np.array(points[48:68], dtype=np.int32)
-        hull = cv2.convexHull(lip_points)
         mask = np.zeros(image.shape[:2], dtype=np.uint8)
-        cv2.fillConvexPoly(mask, hull, 255)
+        cv2.fillConvexPoly(mask, lip_points, 255)
         return mask
 
 def extract_hair_mask_bisenet(image):
-    import cv2
-    import torch
-    h, w = image.shape[:2]
-    # BiSeNet 輸入需 512x512
-    img_resized = cv2.resize(image, (512, 512))
-    img_tensor = torch.from_numpy(img_resized.transpose(2, 0, 1)).unsqueeze(0).float().to(DEVICE) / 255.0
-    with torch.no_grad():
-        out = bisenet_model(img_tensor)[0]
-        parsing = out.squeeze(0).cpu().numpy().argmax(0)
-    # 取出頭髮區域
-    hair_mask = (parsing == 17).astype(np.uint8) * 255
-    # 還原到原圖大小
-    hair_mask_full = cv2.resize(hair_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-    return hair_mask_full
+    """使用 BiSeNet 提取頭髮遮罩"""
+    try:
+        model = get_bisenet_model()
+        
+        # 預處理圖片
+        img = cv2.resize(image, (512, 512))
+        img = img.transpose((2, 0, 1)).astype(np.float32) / 255.0
+        img = torch.from_numpy(img).unsqueeze(0).to(DEVICE)
+        
+        # 推理
+        with torch.no_grad():
+            out, _, _ = model(img)
+            pred = torch.argmax(out, dim=1).squeeze().cpu().numpy()
+        
+        # 頭髮類別為 17
+        hair_mask = (pred == 17).astype(np.uint8) * 255
+        
+        # 調整回原始尺寸
+        hair_mask = cv2.resize(hair_mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
+        
+        return hair_mask
+    except Exception as e:
+        print(f"⚠️ BiSeNet 頭髮提取失敗: {e}")
+        return None
+
+def extract_hair_region(image, landmarks, face_rect):
+    """使用傳統方法提取頭髮區域（fallback）"""
+    if landmarks is None or face_rect is None:
+        return None
+    
+    points = get_landmark_points(landmarks)
+    
+    # 定義頭髮區域的關鍵點
+    hair_points = []
+    
+    # 額頭區域 (68點模型: 17-21, 22-26)
+    if len(points) >= 27:
+        hair_points.extend(points[17:22])  # 左眉毛
+        hair_points.extend(points[22:27])  # 右眉毛
+    
+    # 頭頂區域（估計）
+    if len(points) >= 27:
+        # 使用眉毛中點向上延伸
+        left_brow_center = points[19]
+        right_brow_center = points[24]
+        brow_center = ((left_brow_center[0] + right_brow_center[0]) // 2,
+                      (left_brow_center[1] + right_brow_center[1]) // 2)
+        
+        # 向上延伸約 1.5 倍臉部高度
+        face_height = face_rect.height()
+        hair_top = (brow_center[0], max(0, brow_center[1] - int(face_height * 1.5)))
+        
+        hair_points.append(hair_top)
+    
+    if len(hair_points) < 3:
+        return None
+    
+    # 創建頭髮遮罩
+    hair_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    hair_pts = np.array(hair_points, dtype=np.int32)
+    cv2.fillConvexPoly(hair_mask, cv2.convexHull(hair_pts), 255)
+    
+    return hair_mask
 
 def gray_world_white_balance(img):
     # 灰世界假設自動白平衡
-    img = img.astype(np.float32)
-    avg_b = np.mean(img[:,:,0])
-    avg_g = np.mean(img[:,:,1])
-    avg_r = np.mean(img[:,:,2])
-    avg_gray = (avg_b + avg_g + avg_r) / 3
-    scale_b = avg_gray / avg_b
-    scale_g = avg_gray / avg_g
-    scale_r = avg_gray / avg_r
-    img[:,:,0] *= scale_b
-    img[:,:,1] *= scale_g
-    img[:,:,2] *= scale_r
-    img = np.clip(img, 0, 255).astype(np.uint8)
-    return img
+    result = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    avg_a = np.average(result[:, :, 1])
+    avg_b = np.average(result[:, :, 2])
+    result[:, :, 1] = result[:, :, 1] - ((avg_a - 128) * (result[:, :, 0] / 255.0) * 1.1)
+    result[:, :, 2] = result[:, :, 2] - ((avg_b - 128) * (result[:, :, 0] / 255.0) * 1.1)
+    result = cv2.cvtColor(result, cv2.COLOR_LAB2BGR)
+    return result
 
 def mask_skin_pixels(image, mask):
     # YCrCb 膚色像素過濾
@@ -248,148 +325,87 @@ def mask_skin_pixels(image, mask):
     lower = np.array([0, 133, 77], dtype=np.uint8)
     upper = np.array([255, 173, 127], dtype=np.uint8)
     skin_mask = cv2.inRange(ycrcb, lower, upper)
-    combined = cv2.bitwise_and(mask, skin_mask)
-    # Debug: 印出膚色像素數量與平均 BGR
-    skin_pixels = image[combined > 0]
-    if len(skin_pixels) > 0:
-        mean_bgr = np.mean(skin_pixels, axis=0)
-    else:
-        pass
-    return combined
+    return cv2.bitwise_and(mask, skin_mask)
 
 def calculate_skin_tone(image, landmarks):
-    """
-    一次性優化：自動白平衡、LAB色空間、五區分區、膚色像素過濾、加權平均
-    """
-    if landmarks is None:
+    """計算膚色（優化版本）"""
+    skin_mask = extract_skin_region(image, landmarks)
+    if skin_mask is None:
         return (128, 128, 128)
-    # 1. 自動白平衡
-    image = gray_world_white_balance(image)
-    points = get_landmark_points(landmarks)
-    h, w = image.shape[:2]
-    # 2. 建立五區遮罩
-    masks = {}
-    # 額頭
-    masks['forehead'] = np.zeros((h, w), dtype=np.uint8)
-    if len(points) >= 79:
-        forehead_pts = np.array([points[i] for i in range(69, 79) if i < len(points)], dtype=np.int32)
-        if len(forehead_pts) > 2:
-            cv2.fillConvexPoly(masks['forehead'], forehead_pts, 255)
-    else:
-        if all(p in range(len(points)) for p in [19, 24, 27, 0, 16, 28]):
-            face_width = points[16][0] - points[0][0]
-            forehead_height_ref_y = (points[19][1] + points[24][1]) // 2
-            forehead_height = abs(points[28][1] - forehead_height_ref_y)
-            ellipse_center_y = forehead_height_ref_y - forehead_height
-            cv2.ellipse(masks['forehead'], (points[27][0], ellipse_center_y), (int(face_width * 0.35), forehead_height), 0, 0, 360, 255, -1)
-    # 左臉頰
-    masks['left_cheek'] = np.zeros((h, w), dtype=np.uint8)
-    if all(p in range(len(points)) for p in [1, 2, 3, 4, 31, 48]):
-        left_cheek_pts = np.array([points[1], points[2], points[3], points[4], points[31], points[48]], dtype=np.int32)
-        cv2.fillPoly(masks['left_cheek'], [left_cheek_pts], 255)
-    # 右臉頰
-    masks['right_cheek'] = np.zeros((h, w), dtype=np.uint8)
-    if all(p in range(len(points)) for p in [15, 14, 13, 12, 35, 54]):
-        right_cheek_pts = np.array([points[15], points[14], points[13], points[12], points[35], points[54]], dtype=np.int32)
-        cv2.fillPoly(masks['right_cheek'], [right_cheek_pts], 255)
-    # 鼻樑
-    masks['nose'] = np.zeros((h, w), dtype=np.uint8)
-    if all(p in range(len(points)) for p in [27, 28, 29, 30, 33]):
-        nose_pts = np.array([points[27], points[28], points[29], points[30], points[33]], dtype=np.int32)
-        cv2.fillConvexPoly(masks['nose'], nose_pts, 255)
-    # 下巴
-    masks['chin'] = np.zeros((h, w), dtype=np.uint8)
-    if all(p in range(len(points)) for p in [6, 7, 8, 9, 57]):
-        chin_pts = np.array([points[6], points[7], points[8], points[9], points[57]], dtype=np.int32)
-        cv2.fillConvexPoly(masks['chin'], chin_pts, 255)
-    # 3. 每區遮罩內膚色像素過濾 & LAB平均
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    means = {}
-    for k in masks:
-        filtered_mask = mask_skin_pixels(image, masks[k])
-        if np.any(filtered_mask):
-            mean_lab = cv2.mean(lab, mask=filtered_mask)[:3]
-        else:
-            mean_lab = (0,0,0)
-        means[k] = mean_lab
-    # 4. 加權平均（臉頰各20%、額頭20%、鼻樑20%、下巴20%）
-    final_L = (means['left_cheek'][0] * 0.2 + means['right_cheek'][0] * 0.2 + means['forehead'][0] * 0.2 + means['nose'][0] * 0.2 + means['chin'][0] * 0.2)
-    final_A = (means['left_cheek'][1] * 0.2 + means['right_cheek'][1] * 0.2 + means['forehead'][1] * 0.2 + means['nose'][1] * 0.2 + means['chin'][1] * 0.2)
-    final_B = (means['left_cheek'][2] * 0.2 + means['right_cheek'][2] * 0.2 + means['forehead'][2] * 0.2 + means['nose'][2] * 0.2 + means['chin'][2] * 0.2)
-    # 5. 直接用 OpenCV LAB（不做縮放/偏移）
-    avg_lab = np.uint8([[[final_L, final_A, final_B]]])
-    avg_bgr = cv2.cvtColor(avg_lab, cv2.COLOR_LAB2BGR)[0,0]
-    avg_rgb = (int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0]))
-    # Debug log
-    return avg_rgb
+    
+    # 應用膚色像素過濾
+    filtered_mask = mask_skin_pixels(image, skin_mask)
+    
+    # 計算平均膚色
+    skin_colors = get_dominant_colors(image, mask=filtered_mask)
+    return skin_colors[0] if skin_colors else (128, 128, 128)
 
 def create_debug_image_dlib(image, face_rect, skin_mask, eye_masks, lip_mask, hair_mask, output_path):
-    """使用 dlib 的遮罩建立高精度偵錯圖"""
+    """創建調試圖片（優化版本）"""
     debug_img = image.copy()
-
-    # 定義顏色 (BGR 格式)
-    SKIN_COLOR = (0, 255, 255)  # Yellow
-    EYE_COLOR = (255, 0, 0)      # Blue
-    LIP_COLOR = (0, 0, 255)    # Red
-    HAIR_COLOR = (42, 42, 165)   # Brown
-    FACE_RECT_COLOR = (0, 255, 0) # Green
-
-    # 疊加顏色遮罩
-    # 皮膚
+    
+    # 定義顏色
+    SKIN_COLOR = (0, 255, 0)    # 綠色
+    EYE_COLOR = (255, 0, 0)     # 藍色
+    LIP_COLOR = (0, 0, 255)     # 紅色
+    HAIR_COLOR = (255, 255, 0)  # 青色
+    
+    # 繪製遮罩
     if skin_mask is not None:
         skin_overlay = np.zeros_like(debug_img)
         skin_overlay[skin_mask == 255] = SKIN_COLOR
-        cv2.addWeighted(debug_img, 1, skin_overlay, 0.4, 0, debug_img)
-    # 眼睛
+        cv2.addWeighted(debug_img, 1, skin_overlay, 0.3, 0, debug_img)
+    
     if eye_masks:
         for eye_mask in eye_masks:
             eye_overlay = np.zeros_like(debug_img)
             eye_overlay[eye_mask == 255] = EYE_COLOR
-            cv2.addWeighted(debug_img, 1, eye_overlay, 0.6, 0, debug_img)
-    # 嘴唇
+            cv2.addWeighted(debug_img, 1, eye_overlay, 0.5, 0, debug_img)
+    
     if lip_mask is not None:
         lip_overlay = np.zeros_like(debug_img)
         lip_overlay[lip_mask == 255] = LIP_COLOR
         cv2.addWeighted(debug_img, 1, lip_overlay, 0.5, 0, debug_img)
-    # 頭髮
+    
     if hair_mask is not None:
         hair_overlay = np.zeros_like(debug_img)
         hair_overlay[hair_mask == 255] = HAIR_COLOR
         cv2.addWeighted(debug_img, 1, hair_overlay, 0.4, 0, debug_img)
-
-    # 繪製臉部矩形框
-    if face_rect:
-        x, y, w, h = face_rect.left(), face_rect.top(), face_rect.width(), face_rect.height()
-        cv2.rectangle(debug_img, (x, y), (x + w, y + h), FACE_RECT_COLOR, 2)
-
-    # 儲存偵錯圖
+    
     cv2.imwrite(output_path, debug_img)
 
 def create_debug_mask_image(image, skin_mask=None, eye_masks=None, lip_mask=None, hair_mask=None, output_path='debug_mask.png'):
-    debug_img = image.copy()
-    # 定義顏色 (BGR)
-    SKIN_COLOR = (0, 255, 255)  # 黃
-    EYE_COLOR = (255, 0, 0)     # 藍
-    LIP_COLOR = (0, 0, 255)     # 紅
-    HAIR_COLOR = (128, 0, 128)  # 紫
-    # 疊加遮罩
+    """創建調試遮罩圖片（優化版本）"""
+    debug_img = np.zeros_like(image)
+    
+    # 定義顏色
+    SKIN_COLOR = (0, 255, 0)    # 綠色
+    EYE_COLOR = (255, 0, 0)     # 藍色
+    LIP_COLOR = (0, 0, 255)     # 紅色
+    HAIR_COLOR = (255, 255, 0)  # 青色
+    
+    # 繪製遮罩
     if skin_mask is not None:
         skin_overlay = np.zeros_like(debug_img)
         skin_overlay[skin_mask == 255] = SKIN_COLOR
-        cv2.addWeighted(debug_img, 1, skin_overlay, 0.4, 0, debug_img)
+        cv2.addWeighted(debug_img, 1, skin_overlay, 0.5, 0, debug_img)
+    
     if eye_masks:
         for eye_mask in eye_masks:
             eye_overlay = np.zeros_like(debug_img)
             eye_overlay[eye_mask == 255] = EYE_COLOR
-            cv2.addWeighted(debug_img, 1, eye_overlay, 0.6, 0, debug_img)
+            cv2.addWeighted(debug_img, 1, eye_overlay, 0.5, 0, debug_img)
+    
     if lip_mask is not None:
         lip_overlay = np.zeros_like(debug_img)
         lip_overlay[lip_mask == 255] = LIP_COLOR
         cv2.addWeighted(debug_img, 1, lip_overlay, 0.5, 0, debug_img)
+    
     if hair_mask is not None:
         hair_overlay = np.zeros_like(debug_img)
         hair_overlay[hair_mask == 255] = HAIR_COLOR
         cv2.addWeighted(debug_img, 1, hair_overlay, 0.4, 0, debug_img)
+    
     cv2.imwrite(output_path, debug_img)
 
 def analyze_seasonal_colors(skin_tone, eye_color, hair_color):
@@ -464,19 +480,52 @@ def rgb_to_hex(rgb):
     return '#%02x%02x%02x' % rgb
 
 def get_color_names_from_gemini(hex_colors):
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    prompt = (
-        "請幫我判斷以下色碼的繁體中文名稱，回傳格式為 JSON 物件，key 為色碼，value 為中文名稱：\n"
-        + ", ".join(hex_colors)
-    )
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content(prompt)
-    # 解析 Gemini 回傳的 JSON 內容
-    match = re.search(r'\{.*\}', response.text, re.DOTALL)
-    if match:
-        return json.loads(match.group(0))
-    else:
+    """從 Gemini 獲取顏色名稱（優化版本）"""
+    try:
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        prompt = (
+            "請幫我判斷以下色碼的繁體中文名稱，回傳格式為 JSON 物件，key 為色碼，value 為中文名稱：\n"
+            + ", ".join(hex_colors)
+        )
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(prompt)
+        # 解析 Gemini 回傳的 JSON 內容
+        match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        else:
+            return {c: "未知色名" for c in hex_colors}
+    except Exception as e:
+        print(f"⚠️ Gemini 色名查詢失敗: {e}")
         return {c: "未知色名" for c in hex_colors}
+
+def process_image_parallel(image, landmarks, face):
+    """並行處理圖片分析"""
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        # 提交並行任務
+        skin_future = executor.submit(calculate_skin_tone, image, landmarks)
+        eye_future = executor.submit(extract_eye_regions, image, landmarks)
+        lip_future = executor.submit(extract_lip_region, image, landmarks)
+        hair_future = executor.submit(extract_hair_mask_bisenet, image)
+        
+        # 等待結果
+        skin_tone = skin_future.result()
+        eye_masks = eye_future.result()
+        lip_mask = lip_future.result()
+        hair_mask = hair_future.result()
+        
+        # 處理眼睛顏色
+        all_eye_colors = []
+        if eye_masks:
+            for eye_mask in eye_masks:
+                all_eye_colors.extend(get_dominant_colors(image, mask=eye_mask))
+        eye_color = all_eye_colors[0] if all_eye_colors else (128, 128, 128)
+        
+        # 處理其他顏色
+        lip_color = get_dominant_colors(image, mask=lip_mask)[0] if lip_mask is not None else (128, 128, 128)
+        hair_color = get_dominant_colors(image, mask=hair_mask)[0] if hair_mask is not None else (128, 128, 128)
+        
+        return skin_tone, eye_color, lip_color, hair_color, eye_masks, lip_mask, hair_mask
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -485,6 +534,9 @@ def analyze():
     file = request.files['photo']
     if file.filename == '':
         return jsonify({"error": "未選擇檔案"}), 400
+
+    start_time = time.time()
+    print(f"🚀 開始分析圖片: {file.filename}")
 
     # Save uploaded file
     filename = f"upload_{uuid.uuid4().hex}.jpg"
@@ -497,36 +549,21 @@ def analyze():
         return jsonify({"error": "無法讀取圖片檔案"}), 500
 
     try:
+        # 優化圖片尺寸
+        image = optimize_image_size(image, max_size=1024)
+        
         # --- 1. Face and Landmark Detection ---
+        print("🔍 檢測臉部特徵點...")
         face, landmarks = detect_face_landmarks(image)
         if landmarks is None:
             return jsonify({"error": "未偵測到臉部特徵點，請使用更清晰的正面照。"}), 400
 
-        # --- 2. Analyze Colors using new method ---
-        skin_tone = calculate_skin_tone(image, landmarks)
-        
-        eye_masks = extract_eye_regions(image, landmarks)
-        lip_mask = extract_lip_region(image, landmarks)
-        hair_mask = extract_hair_mask_bisenet(image)
-        if hair_mask is not None:
-            debug_hair_mask_path = os.path.join(DEBUG_OUTPUT_DIR, f"hair_mask_{uuid.uuid4().hex}.png")
-            cv2.imwrite(debug_hair_mask_path, hair_mask)
-        if hair_mask is None:
-            hair_mask = extract_hair_region(image, landmarks, face)
-            if hair_mask is not None:
-                debug_hair_mask_path = os.path.join(DEBUG_OUTPUT_DIR, f"hair_mask_fallback_{uuid.uuid4().hex}.png")
-                cv2.imwrite(debug_hair_mask_path, hair_mask)
-        
-        all_eye_colors = []
-        if eye_masks:
-            for eye_mask in eye_masks:
-                all_eye_colors.extend(get_dominant_colors(image, mask=eye_mask))
-        eye_color = all_eye_colors[0] if all_eye_colors else (128, 128, 128)
+        # --- 2. 並行分析顏色 ---
+        print("🎨 分析顏色...")
+        skin_tone, eye_color, lip_color, hair_color, eye_masks, lip_mask, hair_mask = process_image_parallel(image, landmarks, face)
 
-        lip_color = get_dominant_colors(image, mask=lip_mask)[0] if lip_mask is not None else (128, 128, 128)
-        hair_color = get_dominant_colors(image, mask=hair_mask)[0] if hair_mask is not None else (128, 128, 128)
-
-        # --- 3. Gemini 查詢色名 ---
+        # --- 3. Gemini 查詢色名（可選，如果失敗不影響主要分析） ---
+        print("🌈 查詢顏色名稱...")
         hex_colors = [
             rgb_to_hex(skin_tone),
             rgb_to_hex(eye_color),
@@ -536,20 +573,24 @@ def analyze():
         color_names = get_color_names_from_gemini(hex_colors)
 
         # --- 4. Seasonal Analysis ---
+        print("🌤️ 分析季節性色彩...")
         season, analysis_details = analyze_seasonal_colors(skin_tone, eye_color, hair_color)
 
-        # --- 5. Create Debug Image ---
-        skin_mask_for_debug = extract_skin_region(image, landmarks)
-        debug_image_filename = f"debug_{uuid.uuid4().hex}.jpg"
-        debug_image_path = os.path.join(DEBUG_OUTPUT_DIR, debug_image_filename)
-        create_debug_image_dlib(image, face, skin_mask_for_debug, eye_masks, lip_mask, hair_mask, debug_image_path)
-        debug_image_url = f"/debug/{debug_image_filename}"
+        # --- 5. 可選：創建 Debug 圖片（僅在需要時） ---
+        debug_image_url = ""
+        debug_mask_url = ""
+        if os.environ.get('DEBUG_MODE', 'false').lower() == 'true':
+            print("📸 創建調試圖片...")
+            skin_mask_for_debug = extract_skin_region(image, landmarks)
+            debug_image_filename = f"debug_{uuid.uuid4().hex}.jpg"
+            debug_image_path = os.path.join(DEBUG_OUTPUT_DIR, debug_image_filename)
+            create_debug_image_dlib(image, face, skin_mask_for_debug, eye_masks, lip_mask, hair_mask, debug_image_path)
+            debug_image_url = f"/debug/{debug_image_filename}"
 
-        # --- 5.1. Create Debug Mask Image (for front-end overlay) ---
-        debug_mask_filename = f"debug_mask_{uuid.uuid4().hex}.png"
-        debug_mask_path = os.path.join(DEBUG_OUTPUT_DIR, debug_mask_filename)
-        create_debug_mask_image(image, skin_mask_for_debug, eye_masks, lip_mask, hair_mask, debug_mask_path)
-        debug_mask_url = f"/debug/{debug_mask_filename}"
+            debug_mask_filename = f"debug_mask_{uuid.uuid4().hex}.png"
+            debug_mask_path = os.path.join(DEBUG_OUTPUT_DIR, debug_mask_filename)
+            create_debug_mask_image(image, skin_mask_for_debug, eye_masks, lip_mask, hair_mask, debug_mask_path)
+            debug_mask_url = f"/debug/{debug_mask_filename}"
 
         # --- 6. Prepare Response ---
         response_data = {
@@ -564,12 +605,17 @@ def analyze():
             "analysis_details": analysis_details,
             "debug_image_url": debug_image_url,
             "debug_mask_url": debug_mask_url,
-            "debug_error": ""
+            "debug_error": "",
+            "processing_time": round(time.time() - start_time, 2)
         }
+        
+        print(f"✅ 分析完成，耗時 {response_data['processing_time']} 秒")
         return jsonify(response_data)
 
     except Exception as e:
         import traceback
+        print(f"❌ 分析失敗: {e}")
+        print(traceback.format_exc())
         return jsonify({"error": f"伺服器在進階分析中發生嚴重錯誤: {e}"}), 500
     finally:
         # Clean up the uploaded file
@@ -582,4 +628,4 @@ def serve_debug_image(filename):
 
 if __name__ == '__main__':
     # ... (add predictor file check)
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5001, threaded=True)

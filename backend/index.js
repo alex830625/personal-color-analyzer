@@ -9,7 +9,6 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from "@google/genai";
 dotenv.config();
 
-
 const app = express();
 const PORT = 5000;
 app.use(cors());
@@ -17,6 +16,17 @@ app.use(express.json());
 
 const upload = multer({ dest: 'uploads/' });
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// 簡單的快取機制
+const suggestionCache = new Map();
+const colorNameCache = new Map();
+
+// 快取清理函數（每小時清理一次）
+setInterval(() => {
+    suggestionCache.clear();
+    colorNameCache.clear();
+    console.log('🧹 快取已清理');
+}, 60 * 60 * 1000);
 
 app.post('/api/upload', upload.single('photo'), async (req, res) => {
   try {
@@ -39,10 +49,18 @@ app.post('/api/upload', upload.single('photo'), async (req, res) => {
   }
 });
 
-
 app.post('/api/gemini-suggestion', async (req, res) => {
   try {
     const { season, season_name, skin_tone, eye_color, hair_color, color_suggestions } = req.body;
+    
+    // 生成快取鍵
+    const cacheKey = `${season}_${skin_tone}_${eye_color}_${hair_color}`;
+    
+    // 檢查快取
+    if (suggestionCache.has(cacheKey)) {
+      console.log('📋 使用快取的建議');
+      return res.json({ suggestion: suggestionCache.get(cacheKey) });
+    }
     
     // 構建更詳細的提示詞
     const prompt = `你是一位專業的個人色彩顧問。根據以下詳細分析結果，請用繁體中文寫一段人化色彩建議，內容包含：
@@ -70,8 +88,13 @@ app.post('/api/gemini-suggestion', async (req, res) => {
       contents: prompt,
     });
     const suggestion = response.text;
+    
+    // 儲存到快取
+    suggestionCache.set(cacheKey, suggestion);
+    
     res.json({ suggestion });
   } catch (err) {
+    console.error('❌ Gemini 建議生成失敗:', err.message);
     res.status(500).json({ error: 'Gemini 產生建議失敗', details: err.message });
   }
 });
@@ -82,6 +105,14 @@ app.post('/api/color-names', async (req, res) => {
     if (!Array.isArray(hexes) || hexes.length === 0) {
       return res.status(400).json({ error: '缺少 hexes 陣列' });
     }
+    
+    // 檢查快取
+    const cacheKey = hexes.sort().join(',');
+    if (colorNameCache.has(cacheKey)) {
+      console.log('📋 使用快取的顏色名稱');
+      return res.json(colorNameCache.get(cacheKey));
+    }
+    
     // 組 prompt
     const prompt = `請將以下 HEX 色碼轉為繁體中文顏色名稱，回傳 JSON 格式（key 為色碼，value 為繁體中文名稱）：\n${JSON.stringify(hexes)}\n只回傳 JSON，不要多餘說明。`;
     const response = await ai.models.generateContent({
@@ -97,14 +128,20 @@ app.post('/api/color-names', async (req, res) => {
         colorNames = JSON.parse(match[0]);
       }
     } catch (e) {
+      console.error('❌ JSON 解析失敗:', e.message);
       return res.status(500).json({ error: 'Gemini 回傳格式解析失敗', details: e.message, raw: response.text });
     }
+    
+    // 儲存到快取
+    colorNameCache.set(cacheKey, colorNames);
+    
     res.json(colorNames);
   } catch (err) {
+    console.error('❌ 顏色名稱查詢失敗:', err.message);
     res.status(500).json({ error: 'Gemini 取得色名失敗', details: err.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
+  console.log(`🚀 Backend server running on http://localhost:${PORT}`);
 });
