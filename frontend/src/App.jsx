@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './index.css';
 
@@ -122,15 +122,7 @@ function hexToRgb(hex) {
   const num = parseInt(c, 16);
   return [num >> 16, (num >> 8) & 0xff, num & 0xff];
 }
-// RGB 轉 HEX
-function rgbToHex([r, g, b]) {
-  return (
-    '#' +
-    r.toString(16).padStart(2, '0') +
-    g.toString(16).padStart(2, '0') +
-    b.toString(16).padStart(2, '0')
-  ).toUpperCase();
-}
+
 // 計算兩個 HEX 顏色的歐式距離
 function colorDistance(hex1, hex2) {
   const rgb1 = hexToRgb(hex1);
@@ -141,6 +133,7 @@ function colorDistance(hex1, hex2) {
     Math.pow(rgb1[2] - rgb2[2], 2)
   );
 }
+
 // 取得最相近的顏色名稱
 function getColorName(hex) {
   const code = hex?.toUpperCase();
@@ -156,43 +149,6 @@ function getColorName(hex) {
     }
   }
   return closest;
-}
-
-const seasonNameMap = {
-  spring: '春季',
-  summer: '夏季',
-  autumn: '秋季',
-  winter: '冬季',
-};
-
-function ColorBox({ color }) {
-  return (
-    <div className="w-12 h-12 rounded-3xl border-2 border-doodle shadow" style={{background: color}} title={color}></div>
-  );
-}
-
-function cleanSuggestion(text) {
-  if (!text) return '';
-  // 去除開頭和結尾的單/雙引號（只要有一邊就去掉）
-  text = text.replace(/^['"]+|['"]+$/g, '');
-  // 將 \\n、\r\n、\n、\r 都換成 \n
-  text = text.replace(/\\r\\n|\\n|\\r/g, '\n').replace(/\r\n|\r/g, '\n');
-  // 處理多餘的 \\\\n
-  text = text.replace(/\\\\n/g, '\n');
-  // 將所有 \n 轉成真正的換行
-  text = text.replace(/\\n/g, '\n');
-  // 切成段落（兩個以上換行分段）
-  let paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  // 去除重複段落
-  let seen = new Set();
-  let result = [];
-  for (let p of paragraphs) {
-    if (!seen.has(p)) {
-      seen.add(p);
-      result.push(p);
-    }
-  }
-  return result.join('\n\n');
 }
 
 // 分析結果卡片
@@ -284,18 +240,6 @@ function AnalysisResult({ result, colorNames }) {
   );
 }
 
-// 只從「可視化色板」段落擷取色碼
-function extractPaletteHexes(suggestion) {
-  if (!suggestion) return [];
-  // 支援 ##/###/#### 可視化色板，允許標題前後有空格、冒號
-  const vizSection = suggestion.match(/#+\s*可視化色板[：:]*[\s\S]*?(?=\n#+\s|$)/);
-  if (!vizSection) return [];
-  // 從該段落擷取 #XXXXXX
-  const matches = vizSection[0].match(/#[0-9a-fA-F]{6}/g);
-  if (!matches) return [];
-  return matches.slice(0, 6);
-}
-
 // 解析 Gemini 建議中的主色與輔助色中文名稱
 function extractMainAndAssistNames(suggestion) {
   if (!suggestion) return { main: [], assist: [] };
@@ -311,37 +255,6 @@ function extractMainAndAssistNames(suggestion) {
     main: extractNames(mainMatch ? mainMatch[1] : ''),
     assist: extractNames(assistMatch ? assistMatch[1] : '')
   };
-}
-
-function PaletteBar({ hexes, colorNames }) {
-  if (!hexes || hexes.length === 0) return null;
-  return (
-    <div
-      style={{
-        width: '100%',
-        height: '3rem',
-        borderRadius: '1rem',
-        overflow: 'hidden',
-        boxShadow: '0 2px 8px #e0e0e0',
-        display: 'flex'
-      }}
-    >
-      {hexes.map((hex, i) => (
-        <div
-          key={hex + i}
-          style={{ flex: 1, background: hex, height: '100%', cursor: 'pointer', position: 'relative' }}
-          title={colorNames?.[hex.toLowerCase()] || ''}
-        />
-      ))}
-    </div>
-  );
-}
-
-function CustomVizSection({ node, ...props }) {
-  const Tag = node.tagName || 'h2';
-  return (
-    <Tag className="text-xl font-bold text-accent mt-2 mb-0.5 border-b-2 border-doodle pb-1" style={{letterSpacing: '0.05em', marginBottom: '0.25em'}} {...props} />
-  );
 }
 
 // 在 App 內部定義分組渲染
